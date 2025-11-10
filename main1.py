@@ -283,5 +283,47 @@ u_tv = to_numpy(u_rec)
 show_images([v, u_tv])
 
 # %%
-print("test")
+#### Debluring 
+
+# Load a blur kernel
+kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
+# kt = np.loadtxt('kernels/levin7.txt')
+(m,n) = kt.shape
+
+plt.imshow(kt)
+plt.title('Blur kernel')
+plt.show()
+
+# Embed the kernel in a MxN image, and put center at pixel (0,0)
+k = torch.zeros((M,N))
+k[0:m,0:n] = kt/torch.sum(kt)
+k = torch.roll(k,(-int(m/2),-int(n/2)),(0,1))
+fk = fft2(k)
+
+
+fk = fk.to(dtype=torch.complex64)
+
+# %%
+# Compute the degraded image v = k*u0 + w  (convolution with periodic boundary conditions)
+
+
+sigma = 0.02
+
+# asegurarte que u0 y fk sean tensores float32
+u0_torch = torch.tensor(u0, dtype=torch.float32)
+fk_torch = torch.tensor(fk, dtype=torch.complex64)
+
+# convolución periódica
+u0_fft = fft2(u0_torch)
+conv_u0 = ifft2(u0_fft * fk_torch)
+
+conv_u0 = torch.real(conv_u0)
+v = conv_u0 + sigma * torch.randn_like(conv_u0)
+v = v.clamp(0.0, 1.0)
+
+plt.figure(dpi=100)
+plt.imshow(v.detach().cpu().numpy(), cmap='gray')
+plt.title('Image dégradée')
+plt.axis('off')
+plt.show()
 # %%
