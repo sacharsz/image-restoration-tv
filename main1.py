@@ -110,6 +110,9 @@ plt.show()
 # %%
 #### 2.1.4. Résultats quantitatifs avec PSNR and SSIM
 
+# ------------------
+### RQ : WE SHOULD ADD GRAPHS HERE
+# ------------------
 for lam in lambdas:
     u_rec = tikhonov_fourier(v, lam)
     print(f"λ={lam:>4} → PSNR = {psnr_np(u0, u_rec):.2f} dB")
@@ -208,6 +211,11 @@ show_images(
     titles=["Image bruitée", f"PyTorch (λ={lam})", f"Fourier (λ={lam})"]
 )
 
+# ------------------
+### RQ : ICI L'IMAGE DE LA DIFFERENCE ENTRE LES DEUX EST BIZARRE JE TROUVE, FAUDRAIT QUE
+### REGARDE DE NOUVEAU
+# ------------------
+
 #Explicitation de la différence entre les deux
 im = u_fourier - u_tych
 show_images([im], titles=["PyTorch - Fourier"])
@@ -246,6 +254,8 @@ plt.legend()
 plt.grid(True)
 plt.show()
 
+# %%
+
 # Application de la descente de gradient avec Total Variation comme fonction de régularisation
 
 def tv_reg(u, eps = 0.01):
@@ -271,3 +281,7 @@ plt.show()
 
 u_tv = to_numpy(u_rec)
 show_images([v, u_tv])
+
+# %%
+print("test")
+# %%
