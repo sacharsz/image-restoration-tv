@@ -170,7 +170,7 @@ def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=Fal
             u.clamp_(0, 1)
 
         if record_loss:
-            losses.append(float(loss))
+            losses.append(loss.item())
 
     return (u.detach(), losses) if record_loss else u.detach()
 
