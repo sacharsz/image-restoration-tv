@@ -214,39 +214,77 @@ show_images(
 # ------------------
 ### RQ : ICI L'IMAGE DE LA DIFFERENCE ENTRE LES DEUX EST BIZARRE JE TROUVE, FAUDRAIT QUE
 ### REGARDE DE NOUVEAU
-# ------------------
 
+'''mica: im working on it, 
+observations:
+- the fourier solution uses periodic conditions (we assume the image is infinite so that could give difference in borders)
+para el informe:
+líneas raras en el borde
+halos
+bordes con contraste anormal
+bordes que se “enganchan” con el lado opuesto
+
+In practice: For large images and moderate regularization, these two boundary treatments yield almost identical solutions (except potentially at the edges). Small differences can arise due to:
+
+Floating-point roundoff.
+
+Slight differences in Laplacian discretization between the spectral and finite difference approaches.
+
+When the difference is a uniform gray and the printed mean is tiny, the two denoised images are functionally identical.
+'''
 #Explicitation de la différence entre les deux
 im = u_fourier - u_tych
 show_images([im], titles=["PyTorch - Fourier"])
 
+# ------------------
+# mica: something was still not sticking out to me, so I printed some statistics of the images
+# but apparently its okay, small differences in borders
+# Print statistics for each image to check their ranges:
+for img, name in zip([v, u_tych, u_fourier], ["Noisy", "PyTorch", "Fourier"]):
+    arr = to_numpy(img)
+    print(f"{name} min: {arr.min():.4f}, max: {arr.max():.4f}, mean: {arr.mean():.4f}, shape: {arr.shape}, dtype: {arr.dtype}")
+'''Small differences in how boundary pixels are affected (edges, corners, or where the Laplacian regularizer acts differently) can lead to a tiny deviation in max/min values.
+'''
+# ------------------
+
 
 # Visualisation avec variation de paramètres
-
 # rango de valores de lambda
+# mica: added new measurements to compare quantitatively the two methods
 lambdas = [0.01, 0.02, 0.2, 0.5, 1, 2, 5, 10, 30]
 lrs = [1/(1+16*lam) for lam in lambdas]
 
+from skimage.metrics import structural_similarity as ssim
+
 psnr_fourier_list = []
 psnr_pytorch_list = []
-lam = 1
-for lr in lrs:
-    # solución Fourier
+ssim_fourier_list = []
+ssim_pytorch_list = []
+mse_fourier_list = []
+mse_pytorch_list = []
+
+for lam, lr in zip(lambdas, lrs):
+    # Fourier's solution
     u_fourier = tikhonov_fourier(v, lam)
     psnr_fourier_list.append(psnr_np(u0, u_fourier))
+    ssim_fourier_list.append(ssim(u0, u_fourier, data_range=1.0))
+    mse_fourier_list.append(np.mean((u0 - u_fourier) ** 2))
 
-    # solution gradient descent Tychonov
+    # PyTorch gradient descent solution
     v_torch = torch.tensor(v, dtype=torch.float32)
     n_iter = 500
     u_pytorch, _ = optimize_image(v_torch, lam, lr, n_iter, reg_fn=tikhonov_reg, record_loss=True)
-    u_pytorch_np = u_pytorch.detach().numpy()
+    u_pytorch_np = u_pytorch.cpu().numpy()
     psnr_pytorch_list.append(psnr_np(u0, u_pytorch_np))
+    ssim_pytorch_list.append(ssim(u0, u_pytorch_np, data_range=1.0))
+    mse_pytorch_list.append(np.mean((u0 - u_pytorch_np) ** 2))
 
-# graficar PSNR vs lambda
+
+# plot PSNR vs lambda
 plt.figure(figsize=(8,5))
 plt.plot(lrs, psnr_fourier_list, marker='o', label='Fourier')
 plt.plot(lrs, psnr_pytorch_list, marker='s', label='PyTorch')
-plt.xlabel('Lambda')
+plt.xlabel('Lr (en funcion de lambda)')
 #plt.xscale('log')
 plt.ylabel('PSNR [dB]')
 plt.title('Comparaison du PSNR pour différentes valeurs de lr')
@@ -254,6 +292,42 @@ plt.legend()
 plt.grid(True)
 plt.show()
 
+plt.figure(figsize=(8,5))
+plt.plot(lrs, ssim_fourier_list, marker='o', label='Fourier SSIM')
+plt.plot(lrs, ssim_pytorch_list, marker='s', label='PyTorch SSIM')
+plt.ylabel('SSIM')
+plt.xlabel('Lr (en funcion de lambda)')
+#plt.xscale('log')
+plt.title('Comparaison du SSIM pour différentes valeurs de lr')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# ...
+
+plt.figure(figsize=(8,5))
+plt.plot(lrs, mse_fourier_list, marker='o', label='Fourier MSE')
+plt.plot(lrs, mse_pytorch_list, marker='s', label='PyTorch MSE')
+plt.ylabel('MSE')
+plt.xlabel('Lr (en funcion de lambda)')
+#plt.xscale('log')
+plt.title('Comparaison du mse pour différentes valeurs de lr')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# ...
+
+
+'''Report
+Show all three plots side by side.
+
+State that Fourier and PyTorch are functionally equivalent on your data.
+
+Justify choice of $\lambda$ using PSNR/SSIM peak.
+
+Emphasize that joint metric review (not just PSNR) ensures robust conclusions.
+'''
 # %%
 
 # Application de la descente de gradient avec Total Variation comme fonction de régularisation
