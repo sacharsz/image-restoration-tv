@@ -826,7 +826,6 @@ def run_deblur(method='tv',
                lam=1.0,
                eps_tv=1e-3,
                n_iter=20000,
-               log_every=100,
                k=None,
                v=None):
     """method: 'tv' or 'tikh'
@@ -877,12 +876,7 @@ def run_deblur(method='tv',
         with torch.no_grad():
             guess.clamp_(0, 1)
 
-        # on stocke la loss à CHAQUE itération pour avoir une courbe continue
         loss_values.append(loss.item())
-
-        # optionnel : log dans la console seulement tous les log_every
-        if (i + 1) % log_every == 0:
-            print(f"[{method}] it={i+1}/{n_iter}, loss={loss.item():.4f}")
 
     restored = guess.detach().cpu().numpy()
     return restored, loss_values, lr
@@ -892,12 +886,12 @@ def run_deblur(method='tv',
 # ---------- 5. run both methods ----------
 # Tikhonov (faster convergence)
 lam_tik = 2.0
-rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=200, log_every=1, k = k, v = v)
+rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=200, k = k, v = v)
 
 # TV (needs more iterations)
 lam_tv = 0.05
 eps_tv = 0.001
-rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, log_every=1, k = k, v = v)
+rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, k = k, v = v)
 
 # save results
 plt.imsave('deblur_tikhonov.png', rest_tik, cmap='gray')
@@ -952,8 +946,9 @@ for lam in lams:
             method='tv',
             lam=lam,
             eps_tv=eps,
-            n_iter=5000,
-            log_every=500
+            n_iter=1500,
+            k = k, 
+            v = v
         )
 
         # rest is already numpy → just squeeze
@@ -988,264 +983,4 @@ print("Chosen hyperparameters:")
 print("lam_tik =", lam_tik, "lr_tik =", lr_tik)
 print("lam_tv =", lam_tv, "eps_tv =", eps_tv, "lr_tv =", lr_tv)
 
-#%%
-# RUN TIKHONOV
-guess_tik = v.clone().detach().requires_grad_(True)
-opt_tik = torch.optim.SGD([guess_tik], lr=lr_tik)
 
-loss_values_tik = []
-n_iter_tik = 6000   # enough for Tikhonov
-
-for i in range(n_iter_tik):
-    opt_tik.zero_grad(set_to_none=True)
-    loss = deblur_tikhonov_loss(guess_tik, k_torch, v_torch, lam_tik)
-    loss.backward()
-    opt_tik.step()
-    with torch.no_grad():
-        guess_tik.clamp_(0,1)
-    if i % 100 == 0:
-        loss_values_tik.append(loss.item())
-
-restored_tik = guess_tik.detach().cpu().numpy()
-
-plt.plot(loss_values_tik)
-plt.title("Tikhonov: cost function")
-plt.xlabel("Iteration (x100)")
-plt.ylabel("Cost")
-plt.savefig("tikhonov_loss.png", dpi=120)
-plt.show()
-
-plt.imsave("deblur_tikhonov.png", restored_tik, cmap="gray")
-
-#%%
-# RUN TV
-guess_tv = v.clone().detach().requires_grad_(True)
-opt_tv = torch.optim.SGD([guess_tv], lr=lr_tv)
-
-loss_values_tv = []
-n_iter_tv = 32000   # TV needs more iterations
-
-for i in range(n_iter_tv):
-    opt_tv.zero_grad(set_to_none=True)
-    loss = deblur_tv_loss(guess_tv, k_torch, v_torch, lam_tv, eps_tv)
-    loss.backward()
-    opt_tv.step()
-    with torch.no_grad():
-        guess_tv.clamp_(0,1)
-    if i % 100 == 0:
-        loss_values_tv.append(loss.item())
-
-restored_tv = guess_tv.detach().cpu().numpy()
-
-plt.plot(loss_values_tv)
-plt.title("TV: cost function")
-plt.xlabel("Iteration (x100)")
-plt.ylabel("Cost")
-plt.savefig("tv_loss.png", dpi=120)
-plt.show()
-
-plt.imsave("deblur_tv.png", restored_tv, cmap="gray")
-
-#%%
-# Compute metrics
-
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity
-
-psnr_tik = peak_signal_noise_ratio(u0, restored_tik, data_range=1)
-ssim_tik = structural_similarity(u0, restored_tik, data_range=1)
-
-psnr_tv = peak_signal_noise_ratio(u0, restored_tv, data_range=1)
-ssim_tv = structural_similarity(u0, restored_tv, data_range=1)
-
-print("Tikhonov: PSNR =", psnr_tik, " SSIM =", ssim_tik)
-print("TV       PSNR =", psnr_tv, " SSIM =", ssim_tv)
-
-#%%
-# Combined comparison figure
-
-fig,ax = plt.subplots(1,3,figsize=(12,4))
-ax[0].imshow(v.cpu().numpy(), cmap="gray"); ax[0].set_title("Blurred")
-ax[1].imshow(restored_tik, cmap="gray"); ax[1].set_title("Tikhonov")
-ax[2].imshow(restored_tv, cmap="gray"); ax[2].set_title("TV")
-for a in ax:
-    a.axis("off")
-
-plt.savefig("tikhonov_vs_tv.png", dpi=150)
-plt.show()
-
-#%%
-## lat
-
-#%%
-# %% Deblurring Loss Functions
-
-def deblur_tikhonov_loss(u, k, v, lam):
-    conv_u = periodic_conv2d(u, k)
-    fidelity = 0.5 * torch.sum((conv_u - v)**2)
-    reg = lam * tikhonov_reg(u)
-    return fidelity + reg
-
-def deblur_tv_loss(u, k, v, lam, eps_tv=1e-2):
-    conv_u = periodic_conv2d(u, k)
-    fidelity = 0.5 * torch.sum((conv_u - v)**2)
-    reg = lam * tv_reg(u, eps=eps_tv)
-    return fidelity + reg
-
-# Prepare tensors
-guess = v.clone().detach().requires_grad_(True)
-k_torch = k.clone().detach().float()
-v_torch = v.clone().detach().float()
-lam = 1
-lr_tik = 1/(1 + 16*lam)
-lr_tv = 2/(1 + 8*lam/1e-2)
-n_iter = 7000  # Increase to 20000–35000 for TV if needed
-
-# Choose method
-enable_tv = True  # Set True for TV, False for Tikhonov
-if enable_tv:
-    loss_func = lambda u: deblur_tv_loss(u, k_torch, v_torch, lam)
-    lr = lr_tv
-else:
-    loss_func = lambda u: deblur_tikhonov_loss(u, k_torch, v_torch, lam)
-    lr = lr_tik
-
-opt = torch.optim.SGD([guess], lr=lr)
-loss_values = []
-for i in range(n_iter):
-    opt.zero_grad(set_to_none=True)
-    loss = loss_func(guess)
-    loss.backward()
-    opt.step()
-    with torch.no_grad():
-        guess.clamp_(0, 1)
-    if i % 100 == 0:
-        loss_values.append(loss.item())
-
-#%%
-restored = guess.detach().cpu().numpy()
-
-plt.plot(loss_values)
-plt.title("Cost function during deblurring optimization")
-plt.xlabel("Iteration")
-plt.ylabel("Cost")
-plt.show()
-
-plt.imshow(restored, cmap='gray')
-plt.title("Restored image (deblurred)")
-plt.axis('off')
-plt.show()
-
-#%% [markdown]
-# ## Deblurring with Tychonov regularization
-
-#%%
-# Write the functional with data-fidelity and regularization with weight lam>0.
-def Ft(u, lam=1):
-    ### ... ###
-
-
-lam = 0.01
-tau = ### ... ###
-
-F = lambda u : Ft(u,lam)
-u,losslist = ### ... ###
-utych = u
-
-plt.figure(dpi=180)
-plt.subplot(1,3,1)
-plt.imshow(u0, cmap='gray')
-plt.title('Original',fontsize=8)
-plt.axis('off')
-plt.subplot(1,3,2)
-plt.imshow(v, cmap='gray')
-plt.title('Blurred \n PSNR='+str2(psnr(u0,v)),fontsize=8)
-plt.axis('off')
-plt.subplot(1,3,3)
-plt.imshow(u, cmap='gray')
-plt.title('Linear deblurring \n PSNR='+str2(psnr(u0,u)),fontsize=8)
-plt.axis('off')
-plt.show()
-
-plt.figure(dpi=100)
-plt.plot(losslist)
-plt.show()
-
-#%%
-# Compare with explicit computation of Tychonov denoising (by plotting \|u_n - u_*\| )
-
-### ... ###
-
-print('Final error = ',torch.sqrt(torch.sum((u-us)**2)))
-
-plt.figure(dpi=100)
-plt.semilogy(losslist)
-plt.title('$\|u_n-u_*\|$')
-plt.show()
-
-#%% [markdown]
-# ## Deblurring with smoothed total variation
-
-#%%
-# Write the functional with data-fidelity and regularization with weight lam>0.
-def Gt(u, lam=1, ep=0.01):
-    ### ... ###
-
-
-lam = ### ... ###
-ep = 0.01
-
-tau = ### ... ###
-
-### ... ###
-
-plt.figure(dpi=180)
-plt.subplot(1,3,1)
-plt.imshow(u0, cmap='gray')
-plt.title('Original',fontsize=8)
-plt.axis('off')
-plt.subplot(1,3,2)
-plt.imshow(v, cmap='gray')
-plt.title('Image dégradée',fontsize=8)
-plt.axis('off')
-plt.subplot(1,3,3)
-plt.imshow(u, cmap='gray')
-plt.title('TV deblurring \n PSNR='+str2(psnr(u0,u)),fontsize=8)
-plt.axis('off')
-plt.show()
-
-#%%
-# Compare deblurring results with Tychonov regularization and TV regularization
-
-plt.figure(dpi=150)
-plt.subplot(1,2,1)
-plt.imshow(u0, cmap='gray')
-plt.title('Original',fontsize=8)
-plt.axis('off')
-plt.subplot(1,2,2)
-plt.imshow(v, cmap='gray')
-plt.title('Image dégradée',fontsize=8)
-plt.axis('off')
-plt.show()
-
-plt.figure(dpi=150)
-plt.subplot(1,2,1)
-plt.imshow(utych, cmap='gray')
-plt.title('Linear deblurring \n PSNR='+str2(psnr(u0,utych)),fontsize=8)
-plt.axis('off')
-plt.subplot(1,2,2)
-plt.imshow(utvs, cmap='gray')
-plt.title('TV deblurring \n PSNR='+str2(psnr(u0,utvs)),fontsize=8)
-plt.axis('off')
-plt.show()
-
-#%% [markdown]
-# ## Adjusting the regularization parameter
-
-#%%
-# Find the value of the regularization parameter lambda that optimizes the PSNR
-# Do it first for Tychonov regularization, and then for smoothed TV.
-# Compare the final restoration results obtained with these oracle values of lambda.
-
-### ... ###
-
-# %%
