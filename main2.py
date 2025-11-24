@@ -584,6 +584,8 @@ plt.show()
 # and lambda=0.7 for total variation is okay
 # OBSERVATION. IMPORTANT. THIS ONLY WORKS FOR A CHOSEN SIGMA, maybe it would be good to try if these choices are the same for other sigmas (like images with less noise blabla)
 
+pass
+"""
 v_torch = torch.tensor(v, dtype=torch.float32)
 
 # ---- parameter grids ----
@@ -643,10 +645,12 @@ for i, lam in enumerate(lams_tv):
 plt.suptitle("Total Variation Denoising")
 plt.tight_layout()
 plt.show()
+"""
 
 #%%
 # this code was only used to print the metrics to include in the report. shouldnt include it in the code we send
-
+pass
+"""
 # Compute metrics
 psnr_tyk = psnr_np(u0, u_tyk_np)
 mse_tyk  = np.mean((u0 - u_tyk_np)**2)
@@ -667,7 +671,7 @@ print(f"Tikhonov ($\\lambda=2$) & {psnr_tyk:.2f} & {mse_tyk:.4f} & {mae_tyk:.4f}
 print(f"Total Variation ($\\lambda=0.7$, $\\epsilon=0.001$) & {psnr_tv:.2f} & {mse_tv:.4f} & {mae_tv:.4f} & {ssim_tv:.3f} \\\\")
 print("\\hline")
 print("\\end{tabular}")
-
+"""
 
 #%%
 # this code is to start the debluring part
@@ -781,7 +785,8 @@ fk = fk.to(dtype=torch.complex64)
 # Compute the degraded image v = k*u0 + w  (convolution with periodic boundary conditions)
 
 
-sigma = 0.02
+#sigma = 0.02
+sigma = 0.1
 
 # asegurarte que u0 y fk sean tensores float32
 u0_torch = torch.tensor(u0, dtype=torch.float32)
@@ -882,50 +887,206 @@ def run_deblur(method='tv',
     return restored, loss_values, lr
 
 
-#%%
-# ---------- 5. run both methods ----------
-# Tikhonov (faster convergence)
-lam_tik = 2.0
-rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=200, k = k, v = v)
-
-# TV (needs more iterations)
-lam_tv = 0.05
-eps_tv = 0.001
-rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, k = k, v = v)
-
-# save results
-plt.imsave('deblur_tikhonov.png', rest_tik, cmap='gray')
-plt.imsave('deblur_tv.png', rest_tv, cmap='gray')
 
 #%%
-# === Affichage des deux images restaurées ===
-plt.figure(figsize=(10, 4))
+# Étude quantitative de l'influence de λ pour le deblurring Tikhonov
 
-plt.subplot(1, 2, 1)
-plt.imshow(rest_tik, cmap='gray')
-plt.title(f'Tikhonov (λ={lam_tik}, lr={lr_tik:.2e})')
-plt.axis('off')
 
-plt.subplot(1, 2, 2)
-plt.imshow(rest_tv, cmap='gray')
-plt.title(f'TV (λ={lam_tv}, ε={eps_tv}, lr={lr_tv:.2e})')
-plt.axis('off')
+lambdas_tik = [0.1, 0.3, 0.5, 1, 2, 3, 5, 7, 10]
+#lambdas_tik = [0.01, 0.03, 0.05, 0.07, 0.1]
+#lambdas_tik = [0.005, 0.007, 0.01, 0.03, 0.05]
+psnr_tik, ssim_tik, mse_tik, mae_tik = [], [], [], []
 
+for lam in lambdas_tik:
+    # on peut adapter n_iter si nécessaire
+    rest_tik_lam, loss_tik_lam, lr_tik_lam = run_deblur(
+        method='tikh',
+        lam=lam,
+        n_iter=200,
+        k=k,
+        v=v
+    )
+    u_np = rest_tik_lam  # run_deblur renvoie déjà un numpy
+
+    psnr_tik.append(psnr_np(u0, u_np))
+    ssim_tik.append(ssim(u0, u_np, data_range=1.0))
+    mse_tik.append(np.mean((u0 - u_np) ** 2))
+    mae_tik.append(np.mean(np.abs(u0 - u_np)))
+
+psnr_tik = np.array(psnr_tik)
+ssim_tik = np.array(ssim_tik)
+mse_tik  = np.array(mse_tik)
+mae_tik  = np.array(mae_tik)
+
+# Normalisation (0–1) par le max de chaque métrique
+psnr_tik_n = psnr_tik / psnr_tik.max()
+ssim_tik_n = ssim_tik / ssim_tik.max()
+mse_tik_n  = mse_tik  / mse_tik.max()
+mae_tik_n  = mae_tik  / mae_tik.max()
+
+plt.figure(figsize=(8, 4))
+plt.plot(lambdas_tik, psnr_tik_n, marker='o', label='PSNR (norm.)')
+plt.plot(lambdas_tik, ssim_tik_n, marker='s', label='SSIM (norm.)')
+plt.plot(lambdas_tik, mse_tik_n,  marker='^', label='MSE (norm.)')
+plt.plot(lambdas_tik, mae_tik_n,  marker='d', label='MAE (norm.)')
+plt.xscale('log')
+plt.xlabel(r'$\lambda$')
+plt.ylabel('Métriques normalisées')
+plt.title('Deblurring Tikhonov – métriques normalisées en fonction de $\lambda$')
+plt.grid(True)
+plt.legend()
 plt.tight_layout()
 plt.show()
 
-# === Courbes des deux fonctions de perte ===
-iters_tik = np.arange(len(loss_tik))
-iters_tv  = np.arange(len(loss_tv))
+#%%
+# Affichage de la fonction de coût pour un seul λ
+
+lam_plot = 0.05   # <-- choisis ici le lambda que tu veux visualiser
+n_iter_plot = 200
+
+_, loss_plot, lr_plot = run_deblur(
+    method='tikh',
+    lam=lam_plot,
+    n_iter=n_iter_plot,
+    k=k,
+    v=v
+)
+
+iters = np.arange(len(loss_plot))
+
+plt.figure(figsize=(7, 4))
+plt.plot(iters, loss_plot)
+plt.xlabel("Itérations")
+plt.ylabel("Loss")
+plt.title(f"Tikhonov – Fonction de coût pour λ={lam_plot} (lr={lr_plot:.2e})")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#%%
+# Etude qualitatif : images restaurées cote à cote pour différents λ
+
+lambdas_show = [0.1, 0.3, 0.5, 1, 2, 3, 5, 7, 10]
+n_iter_show = 200
+
+rest_images = []
+
+for lam in lambdas_show:
+    restored, _, lr_tmp = run_deblur(
+        method='tikh',
+        lam=lam,
+        n_iter=n_iter_show,
+        k=k,
+        v=v
+    )
+    rest_images.append((lam, restored, lr_tmp))
+
+# --- création de la figure ---
+plt.figure(figsize=(16, 3))
+
+# --- colonne 1 : Original ---
+plt.subplot(1, len(rest_images) + 2, 1)
+plt.imshow(u0, cmap='gray')
+plt.title("Original")
+plt.axis("off")
+
+# --- colonne 2 : Floutée ---
+plt.subplot(1, len(rest_images) + 2, 2)
+plt.imshow(v, cmap='gray')
+plt.title("Blurred")
+plt.axis("off")
+
+# --- colonnes suivantes : λ différents ---
+for i, (lam, img, lr) in enumerate(rest_images):
+    plt.subplot(1, len(rest_images) + 2, i + 3)
+    plt.imshow(img, cmap='gray')
+    plt.title(f"λ={lam}\nlr={lr:.1e}", fontsize=8)
+    plt.axis("off")
+
+plt.suptitle("Deblurring Tikhonov – Influence qualitative de λ", fontsize=13)
+plt.tight_layout()
+plt.show()
+
+#%%
+# Étude quantitative de l'influence de λ pour le deblurring TV
+
+lambdas_tv = [0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.1]
+eps_tv = 0.001
+psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
+
+# on stocke ici les images restaurées pour chaque λ
+rest_tv_images = []   # liste de tuples (lambda, image, lr)
+
+for lam in lambdas_tv:
+    rest_tv_lam, loss_tv_lam, lr_tv_lam = run_deblur(
+        method='tv',
+        lam=lam,
+        eps_tv=eps_tv,
+        n_iter=1500,      # TV a besoin de plus d'itérations
+        k=k,
+        v=v
+    )
+    u_np = rest_tv_lam  # numpy
+
+    # métriques
+    psnr_tv.append(psnr_np(u0, u_np))
+    ssim_tv.append(ssim(u0, u_np, data_range=1.0))
+    mse_tv.append(np.mean((u0 - u_np) ** 2))
+    mae_tv.append(np.mean(np.abs(u0 - u_np)))
+
+    # stockage pour usage ultérieur (affichage qualitatif)
+    rest_tv_images.append((lam, u_np, lr_tv_lam))
+
+psnr_tv = np.array(psnr_tv)
+ssim_tv = np.array(ssim_tv)
+mse_tv  = np.array(mse_tv)
+mae_tv  = np.array(mae_tv)
+
+# Normalisation
+psnr_tv_n = psnr_tv / psnr_tv.max()
+ssim_tv_n = ssim_tv / ssim_tv.max()
+mse_tv_n  = mse_tv  / mse_tv.max()
+mae_tv_n  = mae_tv  / mae_tv.max()
 
 plt.figure(figsize=(8, 4))
-plt.plot(iters_tik, loss_tik, label='Tikhonov')
-plt.plot(iters_tv,  loss_tv,  label='TV')
-plt.xlabel('Itérations')
-plt.ylabel('Loss')
-plt.title('Évolution des fonctions de coût')
+plt.plot(lambdas_tv, psnr_tv_n, marker='o', label='PSNR (norm.)')
+plt.plot(lambdas_tv, ssim_tv_n, marker='s', label='SSIM (norm.)')
+plt.plot(lambdas_tv, mse_tv_n,  marker='^', label='MSE (norm.)')
+plt.plot(lambdas_tv, mae_tv_n,  marker='d', label='MAE (norm.)')
+plt.xscale('log')
+plt.xlabel(r'$\lambda$')
+plt.ylabel('Métriques normalisées')
+plt.title('Deblurring TV – métriques normalisées en fonction de $\lambda$')
 plt.grid(True)
 plt.legend()
+plt.tight_layout()
+plt.show()
+
+# %%
+# Affichage qualitatif TV : Original + Floue + différentes valeurs de λ
+
+plt.figure(figsize=(16, 3))
+
+# Colonne 1 : Original
+plt.subplot(1, len(rest_tv_images) + 2, 1)
+plt.imshow(u0, cmap='gray')
+plt.title("Original")
+plt.axis("off")
+
+# Colonne 2 : Floue
+plt.subplot(1, len(rest_tv_images) + 2, 2)
+plt.imshow(v, cmap='gray')
+plt.title("Blurred")
+plt.axis("off")
+
+# Colonnes suivantes : résultats TV pour chaque λ
+for i, (lam, img, lr_tv_lam) in enumerate(rest_tv_images):
+    plt.subplot(1, len(rest_tv_images) + 2, i + 3)
+    plt.imshow(img, cmap='gray')
+    plt.title(f"λ={lam}\nlr={lr_tv_lam:.1e}", fontsize=8)
+    plt.axis("off")
+
+plt.suptitle("Deblurring TV – Influence qualitative de λ", fontsize=13)
 plt.tight_layout()
 plt.show()
 
@@ -933,8 +1094,8 @@ plt.show()
 # tries different parameters to choose which ones work best for the deblurring part
 
 # ---- choose the parameter grid ----
-lams = [0.01, 0.05, 0.1]
-eps_list = [0.0005, 0.001, 0.005]
+lams = [0.03, 0.05]
+eps_list = [0.005, 0.01, 0.015]
 
 results = {}
 
@@ -968,19 +1129,69 @@ plt.tight_layout()
 plt.show()
 
 #%%
-# tykhonov
+# ---------- 5. run both methods ----------
+# Tikhonov (faster convergence)
+lam_tik = 0.5
+rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=1500, k = k, v = v)
 
-lam_tik = 2
-lr_tik = 1/(1 + 16*lam_tik)
+# TV (needs more iterations)
+lam_tv = 0.03
+eps_tv = 0.005
+rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, k = k, v = v)
 
-# tv
+# save results
+plt.imsave('deblur_tikhonov.png', rest_tik, cmap='gray')
+plt.imsave('deblur_tv.png', rest_tv, cmap='gray')
 
-lam_tv = 0.7
-eps_tv = 1e-3
-lr_tv = 2/(1 + 8*lam_tv/eps_tv)
+#%%
+# === Affichage des images : Original, Floutée, Tikhonov, TV ===
 
-print("Chosen hyperparameters:")
-print("lam_tik =", lam_tik, "lr_tik =", lr_tik)
-print("lam_tv =", lam_tv, "eps_tv =", eps_tv, "lr_tv =", lr_tv)
+plt.figure(figsize=(14, 4))
+
+# Colonne 1 : Original
+plt.subplot(1, 4, 1)
+plt.imshow(u0, cmap='gray')
+plt.title("Original")
+plt.axis("off")
+
+# Colonne 2 : Floutée
+plt.subplot(1, 4, 2)
+plt.imshow(v, cmap='gray')
+plt.title("Blurred")
+plt.axis("off")
+
+# Colonne 3 : Tikhonov
+plt.subplot(1, 4, 3)
+plt.imshow(rest_tik, cmap='gray')
+plt.title(f"Tikhonov\nλ={lam_tik}, lr={lr_tik:.2e}")
+plt.axis("off")
+
+# Colonne 4 : TV
+plt.subplot(1, 4, 4)
+plt.imshow(rest_tv, cmap='gray')
+plt.title(f"TV\nλ={lam_tv}, ε={eps_tv}, lr={lr_tv:.2e}")
+plt.axis("off")
+
+plt.tight_layout()
+plt.show()
 
 
+#%%
+# === Courbes des deux fonctions de perte ===
+
+iters_tik = np.arange(len(loss_tik))
+iters_tv  = np.arange(len(loss_tv))
+
+plt.figure(figsize=(8, 4))
+plt.plot(iters_tik, loss_tik, label='Tikhonov')
+plt.plot(iters_tv,  loss_tv,  label='TV')
+plt.xlabel('Itérations')
+plt.ylabel('Loss')
+plt.title('Évolution des fonctions de coût')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+# %%
