@@ -485,11 +485,11 @@ idx = np.where(smooth_d < thr)[0]
 print("Convergence at iteration:", idx[0] if len(idx)>0 else "not detected")
 
 #%%
-lambdas = [0.1, 0.3, 0.4,  0.5, 0.6, 0.7, 1, 1.5, 2, 2.5]
+lambdas = [0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1, 1.5, 2, 2.5]
 eps = 0.001
 lrs = [2/(1 + 8*lam/eps) for lam in lambdas]
 
-psnr_tv, ssim_tv, mse_tv = [], [], []
+psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
 
 for lam, lr in zip(lambdas, lrs):
     u_t = optimize_image(
@@ -502,36 +502,37 @@ for lam, lr in zip(lambdas, lrs):
     psnr_tv.append(psnr_np(u0, u_np))
     ssim_tv.append(ssim(u0, u_np, data_range=1.0))
     mse_tv.append(np.mean((u0 - u_np)**2))
+    mae_tv.append(np.mean(np.abs(u0 - u_np)))
 
-# === plots with lr and corresponding lambda as x-ticks ===
-labels = [f"lr={lr:.3f}\nλ={lam}" for lr, lam in zip(lrs, lambdas)]
+# --- conversion en numpy ---
+psnr_tv = np.array(psnr_tv)
+ssim_tv = np.array(ssim_tv)
+mse_tv  = np.array(mse_tv)
+mae_tv  = np.array(mae_tv)
 
-plt.figure(figsize=(8,4))
-plt.plot(psnr_tv, marker='s')
-plt.xticks(range(len(lrs)), labels, rotation=45, ha='right')
+# --- normalisation (0–1) par le max de chaque métrique ---
+psnr_tv_n = psnr_tv / psnr_tv.max()
+ssim_tv_n = ssim_tv / ssim_tv.max()
+mse_tv_n  = mse_tv  / mse_tv.max()
+mae_tv_n  = mae_tv  / mae_tv.max()
+
+# === plot unique : toutes les métriques normalisées vs lambda ===
+plt.figure(figsize=(8, 4))
+
+plt.plot(lambdas, psnr_tv_n, marker='o', label='PSNR (normalisé)')
+plt.plot(lambdas, ssim_tv_n, marker='s', label='SSIM (normalisé)')
+plt.plot(lambdas, mse_tv_n,  marker='^', label='MSE (normalisé)')
+plt.plot(lambdas, mae_tv_n,  marker='d', label='MAE (normalisé)')
+
+plt.xscale('log')  # optionnel, tu peux enlever si tu veux un axe linéaire
+plt.xlabel(r'$\lambda$')
+plt.ylabel('Métriques normalisées')
+plt.title('TV – PSNR, SSIM, MSE et MAE normalisés en fonction de $\lambda$')
 plt.grid(True)
-plt.title("TV – PSNR")
-plt.ylabel("PSNR")
+plt.legend()
 plt.tight_layout()
 plt.show()
 
-plt.figure(figsize=(8,4))
-plt.plot(ssim_tv, marker='s')
-plt.xticks(range(len(lrs)), labels, rotation=45, ha='right')
-plt.grid(True)
-plt.title("TV – SSIM")
-plt.ylabel("SSIM")
-plt.tight_layout()
-plt.show()
-
-plt.figure(figsize=(8,4))
-plt.plot(mse_tv, marker='s')
-plt.xticks(range(len(lrs)), labels, rotation=45, ha='right')
-plt.grid(True)
-plt.title("TV – MSE")
-plt.ylabel("MSE")
-plt.tight_layout()
-plt.show()
 
 #%%
 ##### this is to plot both methods for the report .. we repeat the last tests but with the already explored and chosen parameters
@@ -649,21 +650,24 @@ plt.show()
 # Compute metrics
 psnr_tyk = psnr_np(u0, u_tyk_np)
 mse_tyk  = np.mean((u0 - u_tyk_np)**2)
+mae_tyk  = np.mean(np.abs(u0 - u_tyk_np))
 ssim_tyk = ssim(u0, u_tyk_np, data_range=1.0)
 
 psnr_tv = psnr_np(u0, u_tv_np)
 mse_tv  = np.mean((u0 - u_tv_np)**2)
+mae_tv  = np.mean(np.abs(u0 - u_tv_np))
 ssim_tv = ssim(u0, u_tv_np, data_range=1.0)
 
 # Print in LaTeX-ready format
-print("\\begin{tabular}{lccc}")
+print("\\begin{tabular}{lcccc}")
 print("\\hline")
-print("\\textbf{Method} & \\textbf{PSNR [dB]} & \\textbf{MSE} & \\textbf{SSIM} \\\\")
+print("\\textbf{Method} & \\textbf{PSNR [dB]} & \\textbf{MSE} & \\textbf{MAE} & \\textbf{SSIM} \\\\")
 print("\\hline")
-print(f"Tikhonov ($\\lambda=2$) & {psnr_tyk:.2f} & {mse_tyk:.4f} & {ssim_tyk:.3f} \\\\")
-print(f"Total Variation ($\\lambda=0.7$, $\\epsilon=0.001$) & {psnr_tv:.2f} & {mse_tv:.4f} & {ssim_tv:.3f} \\\\")
+print(f"Tikhonov ($\\lambda=2$) & {psnr_tyk:.2f} & {mse_tyk:.4f} & {mae_tyk:.4f} & {ssim_tyk:.3f} \\\\")
+print(f"Total Variation ($\\lambda=0.7$, $\\epsilon=0.001$) & {psnr_tv:.2f} & {mse_tv:.4f} & {mae_tv:.4f} & {ssim_tv:.3f} \\\\")
 print("\\hline")
 print("\\end{tabular}")
+
 
 #%%
 # this code is to start the debluring part
@@ -823,26 +827,48 @@ def run_deblur(method='tv',
                eps_tv=1e-3,
                n_iter=20000,
                log_every=100,
-               lr=None):
-    """method: 'tv' or 'tikh'"""
-    guess = v.clone().detach().float().requires_grad_(True)
-    k_torch = k.clone().detach().float()
-    v_torch = v.clone().detach().float()
+               k=None,
+               v=None):
+    """method: 'tv' or 'tikh'
+       k : noyau de convolution (torch tensor)
+       v : image floutée (torch tensor)
+    """
+    # fallback sur les variables globales si pas données
+    if k is None:
+        raise ValueError("k peut pas être None")
+    else:
+        k_torch = k.clone().detach().float()
+
+    if v is None:
+        raise ValueError("v peut pas être None")
+    else:
+        v_torch = v.clone().detach().float()
+
+    # variable à optimiser
+    guess = v_torch.clone().detach().float().requires_grad_(True)
+
+    # ----- calcul de ||A^T A|| via FFT du noyau k -----
+    H = torch.fft.fft2(k_torch, s=v_torch.shape[-2:])
+    norm_A2 = (H.abs() ** 2).max().item()   # ≈ ||A^T A||
 
     if method == 'tv':
-        # default lr derived formula if not provided:
-        if lr is None:
-            lr = 2.0 / (1.0 + 8.0 * lam / eps_tv)
+        # L ≈ ||A^T A|| + 8 λ / ε
+        L = norm_A2 + 8.0 * lam / eps_tv
+        lr = 1.9 / L
         loss_func = lambda U: deblur_tv_loss(U, k_torch, v_torch, lam, eps_tv=eps_tv)
+
     elif method == 'tikh':
-        if lr is None:
-            lr = 1.0 / (1.0 + 16.0 * lam)
+        # L ≈ ||A^T A|| + 16 λ
+        L = norm_A2 + 16.0 * lam
+        lr = 0.9 / L
         loss_func = lambda U: deblur_tikhonov_loss(U, k_torch, v_torch, lam)
+
     else:
         raise ValueError("method must be 'tv' or 'tikh'")
 
     opt = torch.optim.SGD([guess], lr=lr)
     loss_values = []
+
     for i in range(n_iter):
         opt.zero_grad(set_to_none=True)
         loss = loss_func(guess)
@@ -850,25 +876,64 @@ def run_deblur(method='tv',
         opt.step()
         with torch.no_grad():
             guess.clamp_(0, 1)
-        if i % log_every == 0:
-            loss_values.append(loss.item())
+
+        # on stocke la loss à CHAQUE itération pour avoir une courbe continue
+        loss_values.append(loss.item())
+
+        # optionnel : log dans la console seulement tous les log_every
+        if (i + 1) % log_every == 0:
+            print(f"[{method}] it={i+1}/{n_iter}, loss={loss.item():.4f}")
+
     restored = guess.detach().cpu().numpy()
     return restored, loss_values, lr
+
 
 #%%
 # ---------- 5. run both methods ----------
 # Tikhonov (faster convergence)
 lam_tik = 2.0
-rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=1000, log_every=100)
+rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=200, log_every=1, k = k, v = v)
 
 # TV (needs more iterations)
 lam_tv = 0.05
 eps_tv = 0.001
-rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=5000, log_every=100)
+rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, log_every=1, k = k, v = v)
 
 # save results
 plt.imsave('deblur_tikhonov.png', rest_tik, cmap='gray')
 plt.imsave('deblur_tv.png', rest_tv, cmap='gray')
+
+#%%
+# === Affichage des deux images restaurées ===
+plt.figure(figsize=(10, 4))
+
+plt.subplot(1, 2, 1)
+plt.imshow(rest_tik, cmap='gray')
+plt.title(f'Tikhonov (λ={lam_tik}, lr={lr_tik:.2e})')
+plt.axis('off')
+
+plt.subplot(1, 2, 2)
+plt.imshow(rest_tv, cmap='gray')
+plt.title(f'TV (λ={lam_tv}, ε={eps_tv}, lr={lr_tv:.2e})')
+plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+# === Courbes des deux fonctions de perte ===
+iters_tik = np.arange(len(loss_tik))
+iters_tv  = np.arange(len(loss_tv))
+
+plt.figure(figsize=(8, 4))
+plt.plot(iters_tik, loss_tik, label='Tikhonov')
+plt.plot(iters_tv,  loss_tv,  label='TV')
+plt.xlabel('Itérations')
+plt.ylabel('Loss')
+plt.title('Évolution des fonctions de coût')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
 
 #%%
 # tries different parameters to choose which ones work best for the deblurring part
