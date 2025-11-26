@@ -115,42 +115,61 @@ v = random_noise(u0, mode='gaussian', var=sigma**2)
 
 show_images([u0, v], titles=["Original", f"Noisy σ={sigma}"])
 
-# Tikhonov Fourier
+#%% TIKHONOV FOURIER AND PYTORCH
+
+# --- Tikhonov Fourier ---
 lambdas = [0.1, 0.3, 0.5, 1, 2, 3, 4, 5]
 tikh_results = [(lam, tikhonov_fourier(v, lam)) for lam in lambdas]
 best_lambda = 2
 
-# Tikhonov PyTorch
+# --- Tikhonov PyTorch ---
 v_torch = torch.tensor(v, dtype=torch.float32)
 lam_tyk = 2
 lr_tyk = 1/(1 + 16*lam_tyk)
-u_tyk, loss_tyk = optimize_image(v_torch, lam_tyk, lr_tyk, n_iter=500, reg_fn=tikhonov_reg, record_loss=True)
+u_tyk, loss_tyk = optimize_image(v_torch, lam_tyk, lr_tyk, n_iter=500,
+                                 reg_fn=tikhonov_reg, record_loss=True)
 
-# Total Variation PyTorch
+# --- Total Variation PyTorch ---
 lam_tv = 0.7
 eps = 1e-3
 lr_tv = 2/(1 + 8*lam_tv/eps)
-u_tv, loss_tv = optimize_image(v_torch, lam_tv, lr_tv, n_iter=7000, reg_fn=lambda u: tv_reg(u, eps), record_loss=True)
+u_tv, loss_tv = optimize_image(v_torch, lam_tv, lr_tv, n_iter=7000,
+                               reg_fn=lambda u: tv_reg(u, eps), record_loss=True)
 
-# Metrics across λ for TV
-lambdas_tv = [0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1, 1.5, 2, 2.5]
-lrs_tv = [2/(1 + 8*lam/eps) for lam in lambdas_tv]
-psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
-for lam, lr in zip(lambdas_tv, lrs_tv):
-    u_tmp = optimize_image(v_torch, lam, lr, n_iter=6000, reg_fn=lambda u: tv_reg(u, eps), record_loss=False)
-    u_np = u_tmp.detach().cpu().numpy()
-    psnr_tv.append(psnr_np(u0, u_np))
-    ssim_tv.append(ssim_np(u0, u_np))
-    mse_tv.append(np.mean((u0-u_np)**2))
-    mae_tv.append(np.mean(np.abs(u0-u_np)))
-psnr_tv_n = np.array(psnr_tv)/max(psnr_tv)
-ssim_tv_n = np.array(ssim_tv)/max(ssim_tv)
-mse_tv_n  = np.array(mse_tv)/max(mse_tv)
-mae_tv_n  = np.array(mae_tv)/max(mae_tv)
+#%% METRICS - TIKHONOV AND TV
 
-#%% PLOTTING - DENOISING BLOCK
+u_tyk_np = to_numpy(u_tyk)
+u_tv_np = to_numpy(u_tv)
+u_fourier = tikhonov_fourier(v, lam_tyk)
 
-# Tikhonov Fourier qualitative
+# --- Tikhonov metrics ---
+psnr_tyk = psnr_np(u0, u_tyk_np)
+ssim_tyk = ssim_np(u0, u_tyk_np)
+mse_tyk  = np.mean((u0-u_tyk_np)**2)
+mae_tyk  = np.mean(np.abs(u0-u_tyk_np))
+
+psnr_fourier = psnr_np(u0, u_fourier)
+ssim_fourier = ssim_np(u0, u_fourier)
+mse_fourier  = np.mean((u0-u_fourier)**2)
+mae_fourier  = np.mean(np.abs(u0-u_fourier))
+
+# --- Total Variation metrics ---
+psnr_tv_val = psnr_np(u0, u_tv_np)
+ssim_tv_val = ssim_np(u0, u_tv_np)
+mse_tv_val  = np.mean((u0-u_tv_np)**2)
+mae_tv_val  = np.mean(np.abs(u0-u_tv_np))
+
+# --- print table ---
+print("\n=== Quantitative comparison ===")
+print(f"{'Method':<20} | {'PSNR':>6} | {'SSIM':>6} | {'MSE':>6} | {'MAE':>6}")
+print("-"*50)
+print(f"Tikhonov Fourier (λ={lam_tyk})  | {psnr_fourier:6.2f} | {ssim_fourier:6.3f} | {mse_fourier:6.4f} | {mae_fourier:6.4f}")
+print(f"Tikhonov PyTorch (λ={lam_tyk}) | {psnr_tyk:6.2f} | {ssim_tyk:6.3f} | {mse_tyk:6.4f} | {mae_tyk:6.4f}")
+print(f"Total Variation (λ={lam_tv})   | {psnr_tv_val:6.2f} | {ssim_tv_val:6.3f} | {mse_tv_val:6.4f} | {mae_tv_val:6.4f}")
+
+#%% PLOTTING
+
+# --- Tikhonov Fourier qualitative ---
 fig, axes = plt.subplots(2, 4, figsize=(16, 8))
 for ax, (lam, u_img) in zip(axes.flatten(), tikh_results):
     ax.imshow(u_img, cmap='gray')
@@ -159,7 +178,7 @@ for ax, (lam, u_img) in zip(axes.flatten(), tikh_results):
 plt.tight_layout()
 plt.show()
 
-# Tikhonov PyTorch cost
+# --- Tikhonov PyTorch cost ---
 plt.figure(figsize=(5,3))
 plt.plot(loss_tyk)
 plt.title("Tikhonov cost evolution")
@@ -168,13 +187,11 @@ plt.ylabel("J(u)")
 plt.grid(True)
 plt.show()
 
-# Tikhonov Fourier vs PyTorch
-u_tyk_np = to_numpy(u_tyk)
-u_fourier = tikhonov_fourier(v, lam_tyk)
+# --- Tikhonov Fourier vs PyTorch ---
 show_images([v, u_tyk_np, u_fourier, u_fourier-u_tyk_np],
             titles=["Noisy", f"PyTorch λ={lam_tyk}", f"Fourier λ={lam_tyk}", "Difference"])
 
-# Total Variation cost
+# --- Total Variation cost ---
 plt.figure(figsize=(5,3))
 plt.plot(loss_tv)
 plt.title("Total Variation cost evolution")
@@ -183,7 +200,25 @@ plt.ylabel("J(u)")
 plt.grid(True)
 plt.show()
 
-# TV metrics vs λ
+# --- TV metrics vs λ ---
+lambdas_tv = [0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1, 1.5, 2, 2.5]
+lrs_tv = [2/(1 + 8*lam/eps) for lam in lambdas_tv]
+psnr_tv_list, ssim_tv_list, mse_tv_list, mae_tv_list = [], [], [], []
+for lam, lr in zip(lambdas_tv, lrs_tv):
+    u_tmp = optimize_image(v_torch, lam, lr, n_iter=6000,
+                           reg_fn=lambda u: tv_reg(u, eps), record_loss=False)
+    u_np = u_tmp.detach().cpu().numpy()
+    psnr_tv_list.append(psnr_np(u0, u_np))
+    ssim_tv_list.append(ssim_np(u0, u_np))
+    mse_tv_list.append(np.mean((u0-u_np)**2))
+    mae_tv_list.append(np.mean(np.abs(u0-u_np)))
+
+# --- normalize ---
+psnr_tv_n = np.array(psnr_tv_list)/max(psnr_tv_list)
+ssim_tv_n = np.array(ssim_tv_list)/max(ssim_tv_list)
+mse_tv_n  = np.array(mse_tv_list)/max(mse_tv_list)
+mae_tv_n  = np.array(mae_tv_list)/max(mae_tv_list)
+
 plt.figure(figsize=(8,4))
 plt.plot(lambdas_tv, psnr_tv_n, marker='o', label='PSNR')
 plt.plot(lambdas_tv, ssim_tv_n, marker='s', label='SSIM')
@@ -198,9 +233,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# Comparison side-by-side
-u_tyk_np = to_numpy(u_tyk)
-u_tv_np = to_numpy(u_tv)
+# --- Comparison side-by-side ---
 fig, axes = plt.subplots(1,2, figsize=(10,5))
 axes[0].imshow(u_tyk_np, cmap='gray')
 axes[0].set_title(f"Tikhonov λ={lam_tyk}")
