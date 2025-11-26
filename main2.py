@@ -579,6 +579,44 @@ plt.tight_layout()
 plt.show()
 
 #%%
+
+def mse_np(ref, est):
+    return np.mean((ref - est)**2)
+
+def mae_np(ref, est):
+    return np.mean(np.abs(ref - est))
+
+# --- Tikhonov ---
+psnr_tyk = psnr_np(u0, u_tyk_np)
+mse_tyk  = mse_np(u0, u_tyk_np)
+mae_tyk  = mae_np(u0, u_tyk_np)
+ssim_tyk = ssim(u0, u_tyk_np, data_range=1.0)
+
+# --- TV ---
+psnr_tv = psnr_np(u0, u_tv_np)
+mse_tv  = mse_np(u0, u_tv_np)
+mae_tv  = mae_np(u0, u_tv_np)
+ssim_tv = ssim(u0, u_tv_np, data_range=1.0)
+
+# ============================================================
+# === Print results in clean format ===========================
+# ============================================================
+
+print("\n=== Quantitative comparison ===")
+print(f"Tikhonov (λ={lam_tyk}):")
+print(f"  PSNR = {psnr_tyk:.2f} dB")
+print(f"  MSE  = {mse_tyk:.4f}")
+print(f"  MAE  = {mae_tyk:.4f}")
+print(f"  SSIM = {ssim_tyk:.3f}")
+
+print(f"\nTotal Variation (λ={lam_tv}, ε={eps}):")
+print(f"  PSNR = {psnr_tv:.2f} dB")
+print(f"  MSE  = {mse_tv:.4f}")
+print(f"  MAE  = {mae_tv:.4f}")
+print(f"  SSIM = {ssim_tv:.3f}")
+
+
+#%%
 #### this is code done to CONFIRM that the chosen parameters were ok.
 # we finally decided that lambda=2 for tykhonov
 # and lambda=0.7 for total variation is okay
@@ -786,7 +824,7 @@ fk = fk.to(dtype=torch.complex64)
 
 
 #sigma = 0.02
-sigma = 0.1
+sigma = 0.5
 
 # asegurarte que u0 y fk sean tensores float32
 u0_torch = torch.tensor(u0, dtype=torch.float32)
@@ -1131,17 +1169,46 @@ plt.show()
 #%%
 # ---------- 5. run both methods ----------
 # Tikhonov (faster convergence)
-lam_tik = 0.5
+lam_tik = 3
 rest_tik, loss_tik, lr_tik = run_deblur(method='tikh', lam=lam_tik, n_iter=1500, k = k, v = v)
 
 # TV (needs more iterations)
-lam_tv = 0.03
+lam_tv = 0.3
 eps_tv = 0.005
 rest_tv, loss_tv, lr_tv = run_deblur(method='tv', lam=lam_tv, eps_tv=eps_tv, n_iter=1500, k = k, v = v)
 
 # save results
 plt.imsave('deblur_tikhonov.png', rest_tik, cmap='gray')
 plt.imsave('deblur_tv.png', rest_tv, cmap='gray')
+
+
+#%%
+# ---------- Compute metrics ----------
+def compute_metrics(u_ref, u_est):
+    u_ref = np.array(u_ref)
+    u_est = np.array(u_est)
+    mse  = np.mean((u_ref - u_est)**2)
+    mae  = np.mean(np.abs(u_ref - u_est))
+    rmse = np.sqrt(mse)
+    psnr = 20 * np.log10(1.0 / rmse)
+    ssim_val = ssim(u_ref, u_est, data_range=1.0)
+    return psnr, mse, mae, ssim_val
+
+psnr_tik, mse_tik, mae_tik, ssim_tik = compute_metrics(u0, rest_tik)
+psnr_tv,  mse_tv,  mae_tv,  ssim_tv  = compute_metrics(u0, rest_tv)
+
+print("\n=== Quantitative comparison ===")
+print(f"Tikhonov (λ={lam_tik}):")
+print(f"  PSNR = {psnr_tik:.2f} dB")
+print(f"  MSE  = {mse_tik:.4f}")
+print(f"  MAE  = {mae_tik:.4f}")
+print(f"  SSIM = {ssim_tik:.3f}")
+
+print(f"\nTotal Variation (λ={lam_tv}, ε={eps_tv}):")
+print(f"  PSNR = {psnr_tv:.2f} dB")
+print(f"  MSE  = {mse_tv:.4f}")
+print(f"  MAE  = {mae_tv:.4f}")
+print(f"  SSIM = {ssim_tv:.3f}")
 
 #%%
 # === Affichage des images : Original, Floutée, Tikhonov, TV ===

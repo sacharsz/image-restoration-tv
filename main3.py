@@ -4,12 +4,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage import data, img_as_float
 from skimage.util import random_noise
-from numpy.fft import fft2, ifft2
 import torch
 from ipywidgets import interact
 import ipywidgets as widgets
 from skimage.metrics import structural_similarity as ssim
-
+from torch.fft import fft2, ifft2, fftshift, ifftshift
 #%% 
 # IMAGES RELATED METHODS
 def to_numpy(x):
@@ -20,7 +19,7 @@ def to_numpy(x):
     else:
         raise TypeError(f"Tipo inesperado: {type(x)}")
 
-def show_images(imgs, titles=None, cmap='gray', figsize=(12,4), vmin=0, vmax=1):
+def show_images(imgs, titles=None, cmap='gray', figsize=(12,4)):
     n = len(imgs)
     fig, axs = plt.subplots(1, n, figsize=figsize)
     if n == 1: axs = [axs]
@@ -105,3 +104,24 @@ def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=Fal
             losses.append(loss.item())
 
     return (u.detach(), losses) if record_loss else u.detach()
+
+
+
+#%%
+# DEBLURING 
+
+#%%
+def periodic_conv2d(u, k):
+    """Periodic (FFT-based) 2D convolution. u, k: (M,N) float32 torch tensors."""
+    uf = fft2(u)
+    kf = fft2(k)
+    return torch.real(ifft2(uf * kf))
+
+#%%
+# IMAGE LOADING 
+u0 = img_as_float(data.camera())  # ou data.coins(), data.astronaut() pour tester d'autres
+M, N = u0.shape
+show_images([u0])
+# %%
+# LOAD BLUR KERNEL
+kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
