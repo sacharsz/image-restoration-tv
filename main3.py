@@ -277,11 +277,7 @@ for img, name in zip([v, u_tych, u_fourier], ["Noisy", "PyTorch", "Fourier"]):
 lambdas_TV = [0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1, 1.5, 2, 2.5]
 eps = 0.001
 lrs_TV = [2/(1 + 8*lam/eps) for lam in lambdas_TV]
-
-
-
-# visualisation
-fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+n_iter_TV = 3000
 
 results = []
 psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
@@ -289,7 +285,7 @@ psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
 for lam, lr in zip(lambdas_TV, lrs_TV):
     u_t = optimize_image(
         v_torch, lam, lr,
-        n_iter=6000,
+        n_iter=n_iter_TV,
         reg_fn=lambda u: tv_reg(u, eps),
         record_loss=False
     )
@@ -340,7 +336,16 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-
+#%%
+# LOSS FUNCTION OF THE TV DENOISING FOR A CERTAIN LAMBDA
+u_rec, loss_values = optimize_image(v_torch, lam=lambdas_TV[-1], lr = lrs_TV[-1], n_iter=6000, reg_fn=tv_reg, record_loss=True)
+plt.figure(figsize=(5,3))
+plt.plot(loss_values)
+plt.title("Évolution de la fonction de coût pour un certain lambda")
+plt.xlabel("Itérations")
+plt.ylabel("J(u)")
+plt.grid(True)
+plt.show()
 
 #%% PLOTTING - DENOISING BLOCK
 
