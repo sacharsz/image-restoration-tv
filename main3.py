@@ -64,3 +64,44 @@ def gradient_y(u):
     gy[:-1, :] = u[1:, :] - u[:-1, :]
     return gy
 
+#%%
+# REGULARISATION FONCTIONS
+def tikhonov_reg(u):
+    """Régularisation de Tikhonov : ||∇u||²"""
+    gx, gy = gradient_x(u), gradient_y(u)
+    return (gx**2 + gy**2).sum()
+
+def tv_reg(u, eps = 0.001):
+    gx, gy = gradient_x(u), gradient_y(u)
+    return torch.sqrt(gx**2 + gy**2 + eps**2).sum()
+
+# Applies the gradient descent 
+def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=False):
+    """
+    Résout : min_u  0.5‖u - v‖² + λ * reg_fn(u)
+    """
+    assert reg_fn is not None, "Tu dois donner une fonction de régularisation reg_fn(u)"
+
+    u = v.detach().clone().float().requires_grad_(True)
+    opt = torch.optim.SGD([u], lr=lr)
+    losses = []
+
+    for _ in range(n_iter):
+        opt.zero_grad(set_to_none=True)
+
+        fidelity = 0.5 * torch.sum((u - v)**2)
+        # fidelity = 0.5 * torch.mean((u - v)**2)
+        reg = lam * reg_fn(u)
+
+        loss = fidelity + reg #fonction à minimiser
+
+        loss.backward()
+        opt.step()
+
+        with torch.no_grad():
+            u.clamp_(0, 1)
+
+        if record_loss:
+            losses.append(loss.item())
+
+    return (u.detach(), losses) if record_loss else u.detach()
