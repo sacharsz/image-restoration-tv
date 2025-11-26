@@ -297,3 +297,4 @@ show_images([u0])
 # %%
 # LOAD BLUR KERNEL
 kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
+
