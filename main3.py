@@ -113,9 +113,25 @@ def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=Fal
 #%%
 def periodic_conv2d(u, k):
     """Periodic (FFT-based) 2D convolution. u, k: (M,N) float32 torch tensors."""
-    uf = fft2(u)
-    kf = fft2(k)
-    return torch.real(ifft2(uf * kf))
+    
+        # --- convertit u en torch.float32 si besoin ---
+    if isinstance(u, np.ndarray):
+        u = torch.tensor(u, dtype=torch.float32)
+    else:
+        u = u.detach().float()
+
+    # --- convertit k en torch.float32 si besoin ---
+    if isinstance(k, np.ndarray):
+        k = torch.tensor(k, dtype=torch.float32)
+    else:
+        k = k.detach().float()
+
+    # passage en complexe pour la FFT
+    u_f = fft2(u)
+    k_f = fft2(k, s=u.shape)
+
+    conv = ifft2(u_f * k_f)
+    return torch.real(conv)
 
 #%%
 # IMAGE LOADING 
@@ -125,3 +141,55 @@ show_images([u0])
 # %%
 # LOAD BLUR KERNEL
 kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
+(m,n) = kt.shape
+show_images([kt], "Blur kerbel")
+
+# Embed the kernel in a MxN image, and put center at pixel (0,0)
+k = torch.zeros((M,N))
+k[0:m,0:n] = kt/torch.sum(kt)
+k = torch.roll(k,(-int(m/2),-int(n/2)),(0,1))
+fk = fft2(k)
+fk = fk.to(dtype=torch.complex64)
+
+# %%
+# GENERATION OF THE BLURED IMAGE
+sigma = 0.5  # écart-type du bruit
+
+conv_u0 = periodic_conv2d(u0, k)
+noise = sigma * torch.randn_like(conv_u0)
+v = (conv_u0 + noise).clamp(0.0, 1.0)  # image floutée + bruit, bornée dans [0,1]
+
+plt.figure(dpi=100)
+plt.imshow(to_numpy(v), cmap='gray')
+plt.title('Image dégradée (blur + bruit)')
+plt.axis('off')
+plt.show()
+# %%
+# LOSS FUNCTION
+
+def deblur_tikhonov_loss(u: torch.Tensor,
+                         k: torch.Tensor,
+                         v: torch.Tensor,
+                         lam: float) -> torch.Tensor:
+    """
+    J(u) = 0.5 ||k * u - v||^2 + λ ||∇u||^2 (Tikhonov).
+    """
+    conv_u = periodic_conv2d(u, k)
+    fidelity = 0.5 * torch.sum((conv_u - v)**2)
+    reg = lam * tikhonov_reg(u)
+    return fidelity + reg
+
+
+def deblur_tv_loss(u: torch.Tensor,
+                   k: torch.Tensor,
+                   v: torch.Tensor,
+                   lam: float,
+                   eps_tv: float = 1e-3) -> torch.Tensor:
+    """
+    J(u) = 0.5 ||k * u - v||^2 + λ TV_eps(u).
+    """
+    conv_u = periodic_conv2d(u, k)
+    fidelity = 0.5 * torch.sum((conv_u - v)**2)
+    reg = lam * tv_reg(u, eps=eps_tv)
+    return fidelity + reg
+# %%
