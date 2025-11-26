@@ -105,6 +105,162 @@ def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=Fal
 
     return (u.detach(), losses) if record_loss else u.detach()
 
+#%%
+def tikhonov_fourier(v, lam):
+    M, N = v.shape
+    xi, zeta = np.meshgrid(np.arange(M), np.arange(N), indexing='ij')
+    L_hat = 4 * (np.sin(np.pi * xi / M) ** 2 + np.sin(np.pi * zeta / N) ** 2)
+    v_hat = fft2(v)
+    u_hat = v_hat / (1 + 2 * lam * L_hat)
+    return np.real(ifft2(u_hat))
+
+def gradient_x(u):
+    gx = torch.zeros_like(u)
+    gx[:, :-1] = u[:, 1:] - u[:, :-1]
+    return gx
+
+def gradient_y(u):
+    gy = torch.zeros_like(u)
+    gy[:-1, :] = u[1:, :] - u[:-1, :]
+    return gy
+
+def tikhonov_reg(u):
+    gx, gy = gradient_x(u), gradient_y(u)
+    return (gx**2 + gy**2).sum()
+
+def tv_reg(u, eps=1e-3):
+    gx, gy = gradient_x(u), gradient_y(u)
+    return torch.sqrt(gx**2 + gy**2 + eps**2).sum()
+
+def optimize_image(v, lam=0.05, lr=0.5, n_iter=200, reg_fn=None, record_loss=False):
+    assert reg_fn is not None
+    u = v.detach().clone().float().requires_grad_(True)
+    opt = torch.optim.SGD([u], lr=lr)
+    losses = []
+    for _ in range(n_iter):
+        opt.zero_grad(set_to_none=True)
+        fidelity = 0.5 * torch.sum((u - v)**2)
+        loss = fidelity + lam * reg_fn(u)
+        loss.backward()
+        opt.step()
+        with torch.no_grad():
+            u.clamp_(0, 1)
+        if record_loss:
+            losses.append(loss.item())
+    return (u.detach(), losses) if record_loss else u.detach()
+
+def show_images(img_list, titles=None):
+    n = len(img_list)
+    fig, axes = plt.subplots(1, n, figsize=(4*n, 4))
+    if n == 1:
+        axes = [axes]
+    for ax, img, title in zip(axes, img_list, titles if titles else [""]*n):
+        ax.imshow(img, cmap='gray')
+        ax.set_title(title)
+        ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+def to_numpy(t):
+    return t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else np.array(t)
+
+#%% METHODOLOGY / COMPUTATION - DENOISING BLOCK
+
+# Tikhonov Fourier
+lambdas = [0.1, 0.3, 0.5, 1, 2, 3, 4, 5]
+tikh_results = [(lam, tikhonov_fourier(v, lam)) for lam in lambdas]
+best_lambda = 2
+
+# Tikhonov PyTorch
+v_torch = torch.tensor(v, dtype=torch.float32)
+lam_tyk = 2
+lr_tyk = 1/(1 + 16*lam_tyk)
+u_tyk, loss_tyk = optimize_image(v_torch, lam_tyk, lr_tyk, n_iter=500, reg_fn=tikhonov_reg, record_loss=True)
+
+# Total Variation PyTorch
+lam_tv = 0.7
+eps = 1e-3
+lr_tv = 2/(1 + 8*lam_tv/eps)
+u_tv, loss_tv = optimize_image(v_torch, lam_tv, lr_tv, n_iter=7000, reg_fn=lambda u: tv_reg(u, eps), record_loss=True)
+
+# Metrics across λ for TV
+lambdas_tv = [0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1, 1.5, 2, 2.5]
+lrs_tv = [2/(1 + 8*lam/eps) for lam in lambdas_tv]
+psnr_tv, ssim_tv, mse_tv, mae_tv = [], [], [], []
+for lam, lr in zip(lambdas_tv, lrs_tv):
+    u_tmp = optimize_image(v_torch, lam, lr, n_iter=6000, reg_fn=lambda u: tv_reg(u, eps), record_loss=False)
+    u_np = u_tmp.detach().cpu().numpy()
+    psnr_tv.append(psnr_np(u0, u_np))
+    ssim_tv.append(ssim_np(u0, u_np))
+    mse_tv.append(np.mean((u0-u_np)**2))
+    mae_tv.append(np.mean(np.abs(u0-u_np)))
+psnr_tv_n = np.array(psnr_tv)/max(psnr_tv)
+ssim_tv_n = np.array(ssim_tv)/max(ssim_tv)
+mse_tv_n  = np.array(mse_tv)/max(mse_tv)
+mae_tv_n  = np.array(mae_tv)/max(mae_tv)
+
+#%% PLOTTING - DENOISING BLOCK
+
+# Tikhonov Fourier qualitative
+fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+for ax, (lam, u_img) in zip(axes.flatten(), tikh_results):
+    ax.imshow(u_img, cmap='gray')
+    ax.set_title(f"λ = {lam}")
+    ax.axis('off')
+plt.tight_layout()
+plt.show()
+
+# Tikhonov PyTorch cost
+plt.figure(figsize=(5,3))
+plt.plot(loss_tyk)
+plt.title("Tikhonov cost evolution")
+plt.xlabel("Iterations")
+plt.ylabel("J(u)")
+plt.grid(True)
+plt.show()
+
+# Tikhonov Fourier vs PyTorch
+u_tyk_np = to_numpy(u_tyk)
+u_fourier = tikhonov_fourier(v, lam_tyk)
+show_images([v, u_tyk_np, u_fourier, u_fourier-u_tyk_np],
+            titles=["Noisy", f"PyTorch λ={lam_tyk}", f"Fourier λ={lam_tyk}", "Difference"])
+
+# Total Variation cost
+plt.figure(figsize=(5,3))
+plt.plot(loss_tv)
+plt.title("Total Variation cost evolution")
+plt.xlabel("Iterations")
+plt.ylabel("J(u)")
+plt.grid(True)
+plt.show()
+
+# TV metrics vs λ
+plt.figure(figsize=(8,4))
+plt.plot(lambdas_tv, psnr_tv_n, marker='o', label='PSNR')
+plt.plot(lambdas_tv, ssim_tv_n, marker='s', label='SSIM')
+plt.plot(lambdas_tv, mse_tv_n, marker='^', label='MSE')
+plt.plot(lambdas_tv, mae_tv_n, marker='d', label='MAE')
+plt.xscale('log')
+plt.xlabel(r'$\lambda$')
+plt.ylabel('Normalized metrics')
+plt.title('Total Variation – Normalized metrics vs λ')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Comparison side-by-side
+u_tyk_np = to_numpy(u_tyk)
+u_tv_np = to_numpy(u_tv)
+fig, axes = plt.subplots(1,2, figsize=(10,5))
+axes[0].imshow(u_tyk_np, cmap='gray')
+axes[0].set_title(f"Tikhonov λ={lam_tyk}")
+axes[0].axis('off')
+axes[1].imshow(u_tv_np, cmap='gray')
+axes[1].set_title(f"Total Variation λ={lam_tv}")
+axes[1].axis('off')
+plt.tight_layout()
+plt.show()
 
 
 #%%
@@ -141,55 +297,3 @@ show_images([u0])
 # %%
 # LOAD BLUR KERNEL
 kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
-(m,n) = kt.shape
-show_images([kt], "Blur kerbel")
-
-# Embed the kernel in a MxN image, and put center at pixel (0,0)
-k = torch.zeros((M,N))
-k[0:m,0:n] = kt/torch.sum(kt)
-k = torch.roll(k,(-int(m/2),-int(n/2)),(0,1))
-fk = fft2(k)
-fk = fk.to(dtype=torch.complex64)
-
-# %%
-# GENERATION OF THE BLURED IMAGE
-sigma = 0.5  # écart-type du bruit
-
-conv_u0 = periodic_conv2d(u0, k)
-noise = sigma * torch.randn_like(conv_u0)
-v = (conv_u0 + noise).clamp(0.0, 1.0)  # image floutée + bruit, bornée dans [0,1]
-
-plt.figure(dpi=100)
-plt.imshow(to_numpy(v), cmap='gray')
-plt.title('Image dégradée (blur + bruit)')
-plt.axis('off')
-plt.show()
-# %%
-# LOSS FUNCTION
-
-def deblur_tikhonov_loss(u: torch.Tensor,
-                         k: torch.Tensor,
-                         v: torch.Tensor,
-                         lam: float) -> torch.Tensor:
-    """
-    J(u) = 0.5 ||k * u - v||^2 + λ ||∇u||^2 (Tikhonov).
-    """
-    conv_u = periodic_conv2d(u, k)
-    fidelity = 0.5 * torch.sum((conv_u - v)**2)
-    reg = lam * tikhonov_reg(u)
-    return fidelity + reg
-
-
-def deblur_tv_loss(u: torch.Tensor,
-                   k: torch.Tensor,
-                   v: torch.Tensor,
-                   lam: float,
-                   eps_tv: float = 1e-3) -> torch.Tensor:
-    """
-    J(u) = 0.5 ||k * u - v||^2 + λ TV_eps(u).
-    """
-    conv_u = periodic_conv2d(u, k)
-    fidelity = 0.5 * torch.sum((conv_u - v)**2)
-    reg = lam * tv_reg(u, eps=eps_tv)
-    return fidelity + reg
-# %%
