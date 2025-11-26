@@ -269,9 +269,25 @@ plt.show()
 #%%
 def periodic_conv2d(u, k):
     """Periodic (FFT-based) 2D convolution. u, k: (M,N) float32 torch tensors."""
-    uf = fft2(u)
-    kf = fft2(k)
-    return torch.real(ifft2(uf * kf))
+    
+        # --- convertit u en torch.float32 si besoin ---
+    if isinstance(u, np.ndarray):
+        u = torch.tensor(u, dtype=torch.float32)
+    else:
+        u = u.detach().float()
+
+    # --- convertit k en torch.float32 si besoin ---
+    if isinstance(k, np.ndarray):
+        k = torch.tensor(k, dtype=torch.float32)
+    else:
+        k = k.detach().float()
+
+    # passage en complexe pour la FFT
+    u_f = fft2(u)
+    k_f = fft2(k, s=u.shape)
+
+    conv = ifft2(u_f * k_f)
+    return torch.real(conv)
 
 #%%
 # IMAGE LOADING 
@@ -281,3 +297,4 @@ show_images([u0])
 # %%
 # LOAD BLUR KERNEL
 kt = torch.tensor(np.loadtxt('kernels/kernel8.txt'))
+
