@@ -26,7 +26,8 @@ All experiments use the 512×512 "cameraman" image.
 ## Method
 
 - **Denoising** (`A = I`, noise σ = 0.5): Tikhonov is solved both in closed form (Fourier) and by gradient descent in PyTorch.
-  The two solutions coincide, which validates the gradient-descent implementation before applying it to TV.
+  The two solutions are almost identical (17.87 dB in closed form, 17.95 dB by gradient descent at λ = 2), which validates the gradient-descent implementation before applying it to TV.
+  The small gap comes from the boundaries: periodic in the Fourier solution, zero gradient at the border in the PyTorch code.
 - **Deblurring** (`A` = convolution with a known blur kernel, noise σ = 0.1): the convolution is computed by FFT with periodic boundaries, and both regularizers are solved by projected gradient descent (pixels kept in [0, 1]).
 - **Step sizes** come from the Lipschitz constant of each gradient (it depends on λ, on ε for TV, and on the blur operator), so no learning rate is tuned by hand.
 - **λ (and ε for TV)** is chosen by sweeping a range of values and comparing the restored images visually and with PSNR, SSIM, MSE and MAE.
